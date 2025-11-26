@@ -6,9 +6,6 @@
 ## Технологии
 - Python 3.10+
 - FastAPI
-- Uvicorn
-- Pydantic
-- (будущий PostgreSQL)
 
 ## Как запустить проект
 ```bash
