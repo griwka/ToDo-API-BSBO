@@ -5,7 +5,7 @@ from database import init_db, get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from scheduler import start_scheduler   
-from routers import tasks, stats
+from routers import tasks, stats, auth
 
 
 @asynccontextmanager
@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ToDo лист API",
     description="API для управления задачами с использованием матрицы Эйзенхауэра",
-    version="2.0.0",
+    version="3.0.0",
     contact={
         "name": "Молчанов Григорий",
     },
@@ -37,8 +37,9 @@ app = FastAPI(
 )
 
 # подключение роутеров к приложению
-app.include_router(tasks.router, prefix="/api/v2")
-app.include_router(stats.router, prefix="/api/v2")
+app.include_router(auth.router, prefix="/api/v3")
+app.include_router(tasks.router, prefix="/api/v3")
+app.include_router(stats.router, prefix="/api/v3")
 
 
 @app.get("/")

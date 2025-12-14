@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from database import Base
 
 class Task(Base):
@@ -56,11 +57,25 @@ class Task(Base):
         nullable=True               # NULL пока задача не завершена
     )
 
-    # 🆕 Новое поле – плановый дедлайн задачи
+    
     deadline_at = Column(
         DateTime(timezone=True),
         nullable=True               # Может быть NULL (дедлайн не обязателен)
     )
+
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),  # При удалении пользователя удаляются его задачи
+        nullable=False,
+        index=True
+    )
+
+    owner = relationship(
+    "User",
+    back_populates="tasks"
+    )
+
+    
 
     def __repr__(self) -> str:
         return f"<Task(id={self.id}, title='{self.title}', quadrant='{self.quadrant}')>"
@@ -77,4 +92,5 @@ class Task(Base):
             "created_at": self.created_at,
             "completed_at": self.completed_at,
             "deadline_at": self.deadline_at,
+            "user_id": self.user_id
         }

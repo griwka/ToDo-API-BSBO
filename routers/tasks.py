@@ -2,13 +2,13 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from datetime import datetime
-from sqlalchemy import Date
 
-from models import Task
+from models import Task, User
 from database import get_async_session
 from schemas import TaskCreate, TaskUpdate, TaskResponse
+from dependencies import get_current_user
 from utils import (
     calculate_urgency,
     calculate_days_until_deadline,
@@ -21,39 +21,94 @@ router = APIRouter(
 )
 
 
-# GET ALL TASKS - Получить все задачи
 @router.get("", response_model=List[TaskResponse])
 async def get_all_tasks(
     db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
 ) -> List[TaskResponse]:
-    result = await db.execute(select(Task))  # SELECT * FROM tasks
-    tasks = result.scalars().all()
-    return tasks
+    if current_user.role.value == "admin":
+        result = await db.execute(select(Task))
+    else:
+        result = await db.execute(select(Task).where(Task.user_id == current_user.id))
 
-@router.get("/today", response_model=list[TaskResponse])
+    tasks = result.scalars().all()
+
+    tasks_with_days = []
+    for task in tasks:
+        days = calculate_days_until_deadline(task.deadline_at)
+        status_message = None
+
+        if days is not None:
+            if days < 0:
+                status_message = "Задача просрочена"
+            elif days == 0:
+                status_message = "Дедлайн сегодня"
+            else:
+                status_message = f"До дедлайна осталось {days} дн."
+
+        task_dict = task.__dict__.copy()
+        task_dict["days_until_deadline"] = days
+        task_dict["status_message"] = status_message
+
+        tasks_with_days.append(TaskResponse(**task_dict))
+
+    return tasks_with_days
+
+
+@router.get("/today", response_model=List[TaskResponse])
 async def get_tasks_today(
     db: AsyncSession = Depends(get_async_session),
-):
+    current_user: User = Depends(get_current_user),
+) -> List[TaskResponse]:
     today = datetime.utcnow().date()
 
-    result = await db.execute(
-        select(Task).where(
-            Task.deadline_at.isnot(None),
-            Task.deadline_at.cast(Date) == today,
-            Task.completed == False
+    if current_user.role.value == "admin":
+        result = await db.execute(
+            select(Task).where(
+                Task.deadline_at.isnot(None),
+                func.date(Task.deadline_at) == today,
+                Task.completed == False,
+            )
         )
-    )
+    else:
+        result = await db.execute(
+            select(Task).where(
+                Task.deadline_at.isnot(None),
+                func.date(Task.deadline_at) == today,
+                Task.completed == False,
+                Task.user_id == current_user.id,
+            )
+        )
 
     tasks = result.scalars().all()
 
-    
-    return tasks
+    tasks_with_days = []
+    for task in tasks:
+        days = calculate_days_until_deadline(task.deadline_at)
+        status_message = None
 
-# GET TASKS BY QUADRANT - Получить задачи по квадранту
+        if days is not None:
+            if days < 0:
+                status_message = "Задача просрочена"
+            elif days == 0:
+                status_message = "Дедлайн сегодня"
+            else:
+                status_message = f"До дедлайна осталось {days} дн."
+
+        task_dict = task.__dict__.copy()
+        task_dict["days_until_deadline"] = days
+        task_dict["status_message"] = status_message
+
+        tasks_with_days.append(TaskResponse(**task_dict))
+
+    return tasks_with_days
+
+
 @router.get("/quadrant/{quadrant}", response_model=List[TaskResponse])
 async def get_tasks_by_quadrant(
     quadrant: str,
     db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
 ) -> List[TaskResponse]:
     if quadrant not in ["Q1", "Q2", "Q3", "Q4"]:
         raise HTTPException(
@@ -61,26 +116,57 @@ async def get_tasks_by_quadrant(
             detail="Неверный квадрант. Используйте: Q1, Q2, Q3, Q4",
         )
 
-    result = await db.execute(
-        select(Task).where(Task.quadrant == quadrant)
-    )  # SELECT * FROM tasks WHERE quadrant = ...
+    if current_user.role.value == "admin":
+        result = await db.execute(select(Task).where(Task.quadrant == quadrant))
+    else:
+        result = await db.execute(
+            select(Task).where(Task.quadrant == quadrant, Task.user_id == current_user.id)
+        )
+
     tasks = result.scalars().all()
-    return tasks
+
+    tasks_with_days = []
+    for task in tasks:
+        days = calculate_days_until_deadline(task.deadline_at)
+        status_message = None
+
+        if days is not None:
+            if days < 0:
+                status_message = "Задача просрочена"
+            elif days == 0:
+                status_message = "Дедлайн сегодня"
+            else:
+                status_message = f"До дедлайна осталось {days} дн."
+
+        task_dict = task.__dict__.copy()
+        task_dict["days_until_deadline"] = days
+        task_dict["status_message"] = status_message
+
+        tasks_with_days.append(TaskResponse(**task_dict))
+
+    return tasks_with_days
 
 
-# SEARCH TASKS - Поиск задач
 @router.get("/search", response_model=List[TaskResponse])
 async def search_tasks(
     q: str = Query(..., min_length=2),
     db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
 ) -> List[TaskResponse]:
-    keyword = f"%{q.lower()}%"  # %keyword% для LIKE
+    keyword = f"%{q.lower()}%"
 
-    result = await db.execute(
-        select(Task).where(
-            (Task.title.ilike(keyword)) | (Task.description.ilike(keyword))
+    if current_user.role.value == "admin":
+        result = await db.execute(
+            select(Task).where((Task.title.ilike(keyword)) | (Task.description.ilike(keyword)))
         )
-    )
+    else:
+        result = await db.execute(
+            select(Task).where(
+                ((Task.title.ilike(keyword)) | (Task.description.ilike(keyword))),
+                Task.user_id == current_user.id,
+            )
+        )
+
     tasks = result.scalars().all()
 
     if not tasks:
@@ -89,14 +175,33 @@ async def search_tasks(
             detail="По данному запросу ничего не найдено",
         )
 
-    return tasks
+    tasks_with_days = []
+    for task in tasks:
+        days = calculate_days_until_deadline(task.deadline_at)
+        status_message = None
+
+        if days is not None:
+            if days < 0:
+                status_message = "Задача просрочена"
+            elif days == 0:
+                status_message = "Дедлайн сегодня"
+            else:
+                status_message = f"До дедлайна осталось {days} дн."
+
+        task_dict = task.__dict__.copy()
+        task_dict["days_until_deadline"] = days
+        task_dict["status_message"] = status_message
+
+        tasks_with_days.append(TaskResponse(**task_dict))
+
+    return tasks_with_days
 
 
-# GET TASKS BY STATUS - Получить задачи по статусу
 @router.get("/status/{status}", response_model=List[TaskResponse])
 async def get_tasks_by_status(
     status: str,
     db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
 ) -> List[TaskResponse]:
     if status not in ["completed", "pending"]:
         raise HTTPException(
@@ -106,28 +211,52 @@ async def get_tasks_by_status(
 
     is_completed = status == "completed"
 
-    result = await db.execute(
-        select(Task).where(Task.completed == is_completed)
-    )  # SELECT * FROM tasks WHERE completed = True/False
+    if current_user.role.value == "admin":
+        result = await db.execute(select(Task).where(Task.completed == is_completed))
+    else:
+        result = await db.execute(
+            select(Task).where(Task.completed == is_completed, Task.user_id == current_user.id)
+        )
+
     tasks = result.scalars().all()
-    return tasks
+
+    tasks_with_days = []
+    for task in tasks:
+        days = calculate_days_until_deadline(task.deadline_at)
+        status_message = None
+
+        if days is not None:
+            if days < 0:
+                status_message = "Задача просрочена"
+            elif days == 0:
+                status_message = "Дедлайн сегодня"
+            else:
+                status_message = f"До дедлайна осталось {days} дн."
+
+        task_dict = task.__dict__.copy()
+        task_dict["days_until_deadline"] = days
+        task_dict["status_message"] = status_message
+
+        tasks_with_days.append(TaskResponse(**task_dict))
+
+    return tasks_with_days
 
 
-# GET TASK BY ID - Получить задачу по ID (с расчётом срока до дедлайна)
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task_by_id(
     task_id: int,
     db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
 ) -> TaskResponse:
-    result = await db.execute(
-        select(Task).where(Task.id == task_id)
-    )  # SELECT * FROM tasks WHERE id = ...
+    result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
 
     if not task:
         raise HTTPException(status_code=404, detail="Задача не найдена")
 
-    # Расчёт дней до дедлайна и статусного сообщения
+    if current_user.role.value != "admin" and task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Недостаточно прав доступа")
+
     days = calculate_days_until_deadline(task.deadline_at)
     status_message = None
 
@@ -139,22 +268,20 @@ async def get_task_by_id(
         else:
             status_message = f"До дедлайна осталось {days} дн."
 
-    # Добавляем временные атрибуты к ORM-объекту, чтобы их подхватил TaskResponse
-    task.days_until_deadline = days
-    task.status_message = status_message
+    task_dict = task.__dict__.copy()
+    task_dict["days_until_deadline"] = days
+    task_dict["status_message"] = status_message
 
-    return task
+    return TaskResponse(**task_dict)
 
 
-# POST - СОЗДАНИЕ НОВОЙ ЗАДАЧИ (с дедлайном и автосчётом срочности)
 @router.post("/", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 async def create_task(
     task: TaskCreate,
     db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
 ) -> TaskResponse:
-    # Вычисляем срочность на основе дедлайна
     is_urgent = calculate_urgency(task.deadline_at)
-    # Определяем квадрант на основе важности и срочности
     quadrant = determine_quadrant(task.is_important, is_urgent)
 
     new_task = Task(
@@ -165,15 +292,16 @@ async def create_task(
         quadrant=quadrant,
         completed=False,
         deadline_at=task.deadline_at,
+        user_id=current_user.id,
     )
 
     db.add(new_task)
     await db.commit()
     await db.refresh(new_task)
 
-    # Для ответа тоже можно посчитать дни/статус
     days = calculate_days_until_deadline(new_task.deadline_at)
     status_message = None
+
     if days is not None:
         if days < 0:
             status_message = "Задача просрочена"
@@ -182,35 +310,34 @@ async def create_task(
         else:
             status_message = f"До дедлайна осталось {days} дн."
 
-    new_task.days_until_deadline = days
-    new_task.status_message = status_message
+    task_dict = new_task.__dict__.copy()
+    task_dict["days_until_deadline"] = days
+    task_dict["status_message"] = status_message
 
-    return new_task
+    return TaskResponse(**task_dict)
 
 
-# PUT - ОБНОВЛЕНИЕ ЗАДАЧИ (учитываем изменения дедлайна/важности)
 @router.put("/{task_id}", response_model=TaskResponse)
 async def update_task(
     task_id: int,
     task_update: TaskUpdate,
     db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
 ) -> TaskResponse:
-    # ШАГ 1: ищем задачу по ID
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
 
     if not task:
         raise HTTPException(status_code=404, detail="Задача не найдена")
 
-    # ШАГ 2: берём только реально переданные поля
+    if current_user.role.value != "admin" and task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Недостаточно прав доступа")
+
     update_data = task_update.model_dump(exclude_unset=True)
 
-    # ШАГ 3: обновляем атрибуты ORM-объекта
     for field, value in update_data.items():
         setattr(task, field, value)
 
-    # ШАГ 4: пересчитываем срочность и квадрант, если изменились дедлайн/важность
-    # даже если не изменились явно — всё равно считаем от актуальных значений
     is_urgent = calculate_urgency(task.deadline_at)
     task.is_urgent = is_urgent
     task.quadrant = determine_quadrant(task.is_important, is_urgent)
@@ -218,9 +345,9 @@ async def update_task(
     await db.commit()
     await db.refresh(task)
 
-    # Расчёт дней и статуса для ответа
     days = calculate_days_until_deadline(task.deadline_at)
     status_message = None
+
     if days is not None:
         if days < 0:
             status_message = "Задача просрочена"
@@ -229,23 +356,27 @@ async def update_task(
         else:
             status_message = f"До дедлайна осталось {days} дн."
 
-    task.days_until_deadline = days
-    task.status_message = status_message
+    task_dict = task.__dict__.copy()
+    task_dict["days_until_deadline"] = days
+    task_dict["status_message"] = status_message
 
-    return task
+    return TaskResponse(**task_dict)
 
 
-# DELETE - УДАЛЕНИЕ ЗАДАЧИ
 @router.delete("/{task_id}", status_code=status.HTTP_200_OK)
 async def delete_task(
     task_id: int,
     db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
 
     if not task:
         raise HTTPException(status_code=404, detail="Задача не найдена")
+
+    if current_user.role.value != "admin" and task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Недостаточно прав доступа")
 
     deleted_task_info = {
         "id": task.id,
@@ -262,11 +393,11 @@ async def delete_task(
     }
 
 
-# PATCH - ОТМЕТИТЬ ЗАДАЧУ ВЫПОЛНЕННОЙ
 @router.patch("/{task_id}/complete", response_model=TaskResponse)
 async def complete_task(
     task_id: int,
     db: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
 ) -> TaskResponse:
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
@@ -274,15 +405,18 @@ async def complete_task(
     if not task:
         raise HTTPException(status_code=404, detail="Задача не найдена")
 
+    if current_user.role.value != "admin" and task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Недостаточно прав доступа")
+
     task.completed = True
     task.completed_at = datetime.now()
 
     await db.commit()
     await db.refresh(task)
 
-    # Для завершённой задачи тоже посчитаем дни/статус относительно дедлайна
     days = calculate_days_until_deadline(task.deadline_at)
     status_message = None
+
     if days is not None:
         if days < 0:
             status_message = "Задача просрочена"
@@ -291,7 +425,8 @@ async def complete_task(
         else:
             status_message = f"До дедлайна осталось {days} дн."
 
-    task.days_until_deadline = days
-    task.status_message = status_message
+    task_dict = task.__dict__.copy()
+    task_dict["days_until_deadline"] = days
+    task_dict["status_message"] = status_message
 
-    return task
+    return TaskResponse(**task_dict)
