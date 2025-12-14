@@ -1,86 +1,113 @@
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field
+from pydantic import ConfigDict
 
 
-# Базовая схема для Task.
-# Все поля, которые есть в нашей "базе данных" tasks_db
+# Базовая схема задачи (общие поля)
 class TaskBase(BaseModel):
     title: str = Field(
         ...,
-        min_length=3,
-        max_length=100,
         description="Название задачи"
     )
     description: Optional[str] = Field(
         None,
-        max_length=500,
         description="Описание задачи"
     )
     is_important: bool = Field(
         ...,
-        description="Важность задачи"
+        description="Флаг важности задачи"
     )
-    is_urgent: bool = Field(
-        ...,
-        description="Срочность задачи"
+    
+    deadline_at: Optional[datetime] = Field(
+        None,
+        description="Плановый дедлайн задачи (дата и время)"
     )
 
 
-# Схема для создания новой задачи (используется в POST)
+# Схема для создания задачи
 class TaskCreate(TaskBase):
+    # is_urgent больше не передаём с фронта — он будет считаться автоматически
     pass
 
 
-# Схема для обновления задачи (используется в PUT)
-# Все поля опциональные
+# Схема для обновления задачи
 class TaskUpdate(BaseModel):
     title: Optional[str] = Field(
         None,
-        min_length=3,
-        max_length=100,
-        description="Новое название задачи"
+        description="Название задачи"
     )
     description: Optional[str] = Field(
         None,
-        max_length=500,
-        description="Новое описание"
+        description="Описание задачи"
     )
     is_important: Optional[bool] = Field(
         None,
-        description="Новая важность"
+        description="Флаг важности задачи"
     )
-    is_urgent: Optional[bool] = Field(
+    deadline_at: Optional[datetime] = Field(
         None,
-        description="Новая срочность"
-    )
-    completed: Optional[bool] = Field(
-        None,
-        description="Статус выполнения"
+        description="Плановый дедлайн задачи (дата и время)"
     )
 
 
-# Модель для ответа (TaskResponse)
+# Схема для ответа (то, что уходит клиенту)
 class TaskResponse(TaskBase):
     id: int = Field(
         ...,
-        description="Уникальный идентификатор задачи",
-        examples=[1]
+        description="Идентификатор задачи"
+    )
+    is_urgent: bool = Field(
+        ...,
+        description="Признак срочности задачи"
     )
     quadrant: str = Field(
         ...,
-        description="Квадрант матрицы Эйзенхауэра (Q1, Q2, Q3, Q4)",
-        examples=["Q1"]
+        description="Квадрант матрицы Эйзенхауэра (Q1–Q4)"
     )
     completed: bool = Field(
-        default=False,
+        ...,
         description="Статус выполнения задачи"
     )
     created_at: datetime = Field(
         ...,
-        description="Дата и время создания задачи"
+        description="Дата создания задачи"
+    )
+    completed_at: Optional[datetime] = Field(
+        None,
+        description="Дата завершения задачи"
     )
 
-    class Config:
-        # понадобится позже при работе с БД
-        from_attributes = True
+    
+    days_until_deadline: Optional[int] = Field(
+        None,
+        description="Количество полных дней до дедлайна"
+    )
+    status_message: Optional[str] = Field(
+        None,
+        description="Текстовый статус задачи относительно дедлайна"
+    )
+
+    # Для работы с ORM-объектами (SQLAlchemy)
+    model_config = ConfigDict(from_attributes=True)
+
+
+
+class TimingStatsResponse(BaseModel):
+    completed_on_time: int = Field(
+        ...,
+        description="Количество задач, завершенных в срок"
+    )
+    completed_late: int = Field(
+        ...,
+        description="Количество задач, завершенных с нарушением сроков"
+    )
+    on_plan_pending: int = Field(
+        ...,
+        description="Количество задач в работе, выполняемых в соответствии с планом"
+    )
+    overtime_pending: int = Field(
+        ...,
+        description="Количество просроченных незавершенных задач"
+    )

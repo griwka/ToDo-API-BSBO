@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from database import init_db, get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
-
+from scheduler import start_scheduler   
 from routers import tasks, stats
 
 
@@ -16,9 +16,11 @@ async def lifespan(app: FastAPI):
 
     # Создаем таблицы (если их нет)
     await init_db()
+    scheduler = start_scheduler()
 
     print(" Приложение готово к работе!")
     yield  # Здесь приложение работает
+    scheduler.shutdown()    
 
     # Код ПОСЛЕ yield выполняется при ОСТАНОВКЕ
     print(" Остановка приложения...")
@@ -43,7 +45,7 @@ app.include_router(stats.router, prefix="/api/v2")
 async def read_root() -> dict:
     return {
         "message": "Task Manager API - Управление задачами по матрице Эйзенхауэра",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "database": "PostgreSQL (Supabase)",
         "docs": "/docs",
         "redoc": "/redoc",

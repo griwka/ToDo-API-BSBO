@@ -5,22 +5,64 @@ from database import Base
 class Task(Base):
     __tablename__ = "tasks"
 
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    id = Column(
+        Integer,
+        primary_key=True,       # Первичный ключ
+        index=True,             # Создать индекс для быстрого поиска
+        autoincrement=True      # Автоматическая генерация
+    )
 
-    title = Column(Text, nullable=False)
-    description = Column(Text, nullable=True)
+    title = Column(
+        Text,                   # Text = текст неограниченной длины
+        nullable=False          # Не может быть NULL
+    )
 
-    is_important = Column(Boolean, nullable=False, default=False)
-    is_urgent = Column(Boolean, nullable=False, default=False)
+    description = Column(
+        Text,
+        nullable=True           # Может быть NULL
+    )
 
-    quadrant = Column(String(2), nullable=False)
+    is_important = Column(
+        Boolean,
+        nullable=False,
+        default=False           # По умолчанию False
+    )
 
-    completed = Column(Boolean, nullable=False, default=False)
+    is_urgent = Column(
+        Boolean,
+        nullable=False,
+        default=False
+    )
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    quadrant = Column(
+        String(2),              # Максимум 2 символа: "Q1", "Q2", "Q3", "Q4"
+        nullable=False
+    )
 
-    def __repr__(self):
+    completed = Column(
+        Boolean,
+        nullable=False,
+        default=False
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),    # С поддержкой часовых поясов
+        server_default=func.now(),  # Автоматически текущее время
+        nullable=False
+    )
+
+    completed_at = Column(
+        DateTime(timezone=True),
+        nullable=True               # NULL пока задача не завершена
+    )
+
+    # 🆕 Новое поле – плановый дедлайн задачи
+    deadline_at = Column(
+        DateTime(timezone=True),
+        nullable=True               # Может быть NULL (дедлайн не обязателен)
+    )
+
+    def __repr__(self) -> str:
         return f"<Task(id={self.id}, title='{self.title}', quadrant='{self.quadrant}')>"
 
     def to_dict(self) -> dict:
@@ -34,4 +76,5 @@ class Task(Base):
             "completed": self.completed,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
+            "deadline_at": self.deadline_at,
         }
